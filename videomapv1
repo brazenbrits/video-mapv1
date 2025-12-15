@@ -1,0 +1,153 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Video Map</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #wrap { height: 100%; display: grid; grid-template-columns: 280px 1fr; }
+    #sidebar { padding: 12px; overflow: auto; border-right: 1px solid #ddd; font-family: system-ui, sans-serif; }
+    #map { height: 100%; }
+    .chk { display:flex; gap:8px; align-items:center; margin:6px 0; }
+    .vid { font-size: 12px; margin: 8px 0; }
+    .vid a { text-decoration:none; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="sidebar">
+      <div style="font-weight:700; margin-bottom:10px;">Channels</div>
+      <div id="filters"></div>
+      <hr />
+      <div style="font-weight:700; margin:10px 0;">Visible videos</div>
+      <div id="list"></div>
+    </div>
+    <div id="map"></div>
+  </div>
+
+<script>
+const DATA_URL = "YOUR_JSON_URL_HERE";
+
+const map = L.map('map').setView([39.5, -98.35], 4); // US-ish
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 18,
+  attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+
+let allRows = [];
+let markers = [];
+let enabledChannels = new Set();
+
+function normalizeChannel(ch) {
+  return (ch || "").trim() || "Unknown";
+}
+
+function buildFilters(rows) {
+  const filters = document.getElementById('filters');
+  filters.innerHTML = '';
+
+  const channels = [...new Set(rows.map(r => normalizeChannel(r.channelTitle)))].sort();
+  channels.forEach(ch => enabledChannels.add(ch));
+
+  channels.forEach(ch => {
+    const div = document.createElement('div');
+    div.className = 'chk';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    cb.onchange = () => {
+      if (cb.checked) enabledChannels.add(ch);
+      else enabledChannels.delete(ch);
+      render();
+    };
+
+    const label = document.createElement('label');
+    label.textContent = ch;
+
+    div.appendChild(cb);
+    div.appendChild(label);
+    filters.appendChild(div);
+  });
+}
+
+function rowHasCoords(r) {
+  const lat = parseFloat(r.geoLat);
+  const lng = parseFloat(r.geoLng);
+  return Number.isFinite(lat) && Number.isFinite(lng);
+}
+
+function popupHtml(r) {
+  const thumb = r.thumbnail || '';
+  const title = r.title || '(untitled)';
+  const url = r.videoUrl || '#';
+  const ch = normalizeChannel(r.channelTitle);
+  const when = r.publishedAt ? new Date(r.publishedAt).toLocaleDateString() : '';
+
+  return `
+    <div style="width:260px;font-family:system-ui,sans-serif;">
+      ${thumb ? `<img src="${thumb}" style="width:100%;border-radius:8px;margin-bottom:8px;" />` : ``}
+      <div style="font-weight:700; margin-bottom:6px;">
+        <a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>
+      </div>
+      <div style="font-size:12px;color:#444;">
+        ${ch}${when ? ` • ${when}` : ``}
+      </div>
+    </div>
+  `;
+}
+
+function clearMarkers() {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+}
+
+function renderList(visibleRows) {
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+  visibleRows.slice(0, 200).forEach(r => {
+    const div = document.createElement('div');
+    div.className = 'vid';
+    div.innerHTML = `<a target="_blank" rel="noopener noreferrer" href="${r.videoUrl}">${r.title || '(untitled)'}</a>`;
+    list.appendChild(div);
+  });
+}
+
+function render() {
+  clearMarkers();
+
+  const visible = allRows
+    .filter(r => enabledChannels.has(normalizeChannel(r.channelTitle)))
+    .filter(rowHasCoords);
+
+  visible.forEach(r => {
+    const lat = parseFloat(r.geoLat);
+    const lng = parseFloat(r.geoLng);
+    const m = L.marker([lat, lng]).addTo(map);
+    m.bindPopup(popupHtml(r));
+    markers.push(m);
+  });
+
+  renderList(visible);
+}
+
+async function init() {
+  const res = await fetch(DATA_URL, { cache: "no-store" });
+  allRows = await res.json();
+
+  buildFilters(allRows);
+  render();
+}
+
+init();
+</script>
+</body>
+</html>
